@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Survey Demo</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --accent:#2f5d8a; --line:#dcdad5; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:32px; width:100%; max-width:520px; }
+  h1 { font-size:1.35rem; margin:0 0 20px; line-height:1.35; }
+  .meta { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
+  input[type=text] { width:100%; font-size:1rem; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  input[type=text]:focus { outline:2px solid var(--accent); border-color:transparent; }
+  button { margin-top:16px; background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:12px 20px; font-size:1rem; cursor:pointer; }
+  .note { color:var(--muted); font-size:.85rem; margin-top:16px; }
+  pre { background:#f2f1ee; padding:12px; border-radius:8px; font-size:.8rem; overflow:auto; }
+</style>
+</head>
+<body>
+<div class="card" id="app"><p class="note">Loading...</p></div>
+
+<script>
+// ===== CONFIG =====
+// The question_id values must match the Embedded Data fields in Qualtrics Survey Flow.
+const QUESTIONS = [
+  { id: "pet",       text: "What is your favorite pet?" },
+  { id: "ice_cream", text: "What is your favorite ice cream?" },
+  { id: "color",     text: "What is your favorite color?" }
+];
+
+// How many random questions each participant gets (1 = one random question).
+const QUESTIONS_PER_PARTICIPANT = 1;
+
+// Where answers are sent. "*" works for testing; for the real study, set this to
+// your Qualtrics domain (the part of the survey link before /jfe/...).
+const QUALTRICS_ORIGIN = "*";
+// ==================
+
+const app = document.getElementById("app");
+const inQualtrics = window.parent !== window;
+const params = new URLSearchParams(location.search);
+// Use the Qualtrics response ID if it was passed in, so both records share an ID.
+const participantId = params.get("rid") ||
+  (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+const answers = {};
+let queue = [];
+let step = 0;
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+function showQuestion() {
+  const q = queue[step];
+  app.innerHTML = `
+    <div class="meta">Question ${step + 1} of ${queue.length}${inQualtrics ? "" : " · test mode (not inside Qualtrics)"}</div>
+    <h1>${escapeHtml(q.text)}</h1>
+    <form id="f">
+      <input type="text" id="answer" autocomplete="off" required autofocus>
+      <button type="submit">${step + 1 < queue.length ? "Next" : "Submit"}</button>
+    </form>`;
+  document.getElementById("f").addEventListener("submit", e => {
+    e.preventDefault();
+    answers[q.id] = document.getElementById("answer").value.trim();
+    step++;
+    step < queue.length ? showQuestion() : submit();
+  });
+}
+
+function submit() {
+  const payload = { type: "survey-complete", participant_id: participantId, answers };
+  if (inQualtrics) {
+    app.innerHTML = `<p class="note">Saving...</p>`;
+    window.parent.postMessage(payload, QUALTRICS_ORIGIN);
+    // Qualtrics advances to its end page once it receives this message.
+  } else {
+    app.innerHTML = `<h1>Thanks!</h1>
+      <p class="note">Test mode: this page is not inside Qualtrics, so nothing was saved. This is what would be sent:</p>
+      <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+  }
+}
+
+queue = shuffle(QUESTIONS).slice(0, Math.min(QUESTIONS_PER_PARTICIPANT, QUESTIONS.length));
+showQuestion();
+</script>
+</body>
+</html>
