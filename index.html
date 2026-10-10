@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Survey Demo</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1f; --muted:#6b6b70; --accent:#2f5d8a; --line:#dcdad5; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+         background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; padding:16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:32px; width:100%; max-width:520px; }
+  h1 { font-size:1.35rem; margin:0 0 20px; line-height:1.35; }
+  .meta { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
+  input[type=text] { width:100%; font-size:1rem; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  input[type=text]:focus { outline:2px solid var(--accent); border-color:transparent; }
+  button { margin-top:16px; background:var(--accent); color:#fff; border:0; border-radius:8px;
+           padding:12px 20px; font-size:1rem; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .note { color:var(--muted); font-size:.85rem; margin-top:16px; }
+  .error { color:#a02b2b; }
+  pre { background:#f2f1ee; padding:12px; border-radius:8px; font-size:.8rem; overflow:auto; }
+</style>
+</head>
+<body>
+<div class="card" id="app"><p class="note">Loading...</p></div>
+
+<script>
+// ===== CONFIG =====
+// Paste your Apps Script Web App URL here (ends in /exec).
+// While it still contains "PASTE", the page runs in DEMO MODE:
+// it uses the fallback questions below and shows the answer payload instead of saving it.
+const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyHmspQThK3EFsajpo509uTJJjr9JhPbJ3cVXU1haiJ7F2bHMtZY4tEjttKpdjQlxa6/exec";
+
+// How many random questions each participant gets (1 = one random question).
+const QUESTIONS_PER_PARTICIPANT = 1;
+
+const FALLBACK_QUESTIONS = [
+  { id: "pet",       text: "What is your favorite pet?" },
+  { id: "ice_cream", text: "What is your favorite ice cream?" },
+  { id: "color",     text: "What is your favorite color?" }
+];
+// ==================
+
+const DEMO = SCRIPT_URL.includes("PASTE");
+const app = document.getElementById("app");
+const participantId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+const answers = {};
+let queue = [];
+let step = 0;
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+async function loadQuestions() {
+  if (DEMO) return FALLBACK_QUESTIONS;
+  const res = await fetch(SCRIPT_URL);
+  const data = await res.json();
+  if (!data.questions || !data.questions.length) throw new Error("No questions returned from Sheet A.");
+  return data.questions;
+}
+
+function showQuestion() {
+  const q = queue[step];
+  app.innerHTML = `
+    <div class="meta">Question ${step + 1} of ${queue.length}${DEMO ? " · demo mode" : ""}</div>
+    <h1>${escapeHtml(q.text)}</h1>
+    <form id="f">
+      <input type="text" id="answer" autocomplete="off" required autofocus>
+      <button type="submit">${step + 1 < queue.length ? "Next" : "Submit"}</button>
+    </form>`;
+  document.getElementById("f").addEventListener("submit", e => {
+    e.preventDefault();
+    answers[q.id] = document.getElementById("answer").value.trim();
+    step++;
+    step < queue.length ? showQuestion() : submit();
+  });
+}
+
+async function submit() {
+  const payload = { participant_id: participantId, answers };
+  app.innerHTML = `<p class="note">Saving...</p>`;
+  try {
+    if (DEMO) {
+      app.innerHTML = `<h1>Thanks!</h1>
+        <p class="note">Demo mode: nothing was saved. This is what would be sent to Sheet B:</p>
+        <pre>${escapeHtml(JSON.stringify(payload, null, 2))}</pre>`;
+      return;
+    }
+    // text/plain avoids a CORS preflight, which Apps Script does not handle.
+    const res = await fetch(SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if (data.status !== "ok") throw new Error(data.message || "Save failed.");
+    app.innerHTML = `<h1>Thanks, your answer was recorded.</h1>`;
+  } catch (err) {
+    app.innerHTML = `<h1>Something went wrong</h1><p class="error">${escapeHtml(err.message)}</p>`;
+  }
+}
+
+loadQuestions()
+  .then(qs => {
+    queue = shuffle(qs).slice(0, Math.min(QUESTIONS_PER_PARTICIPANT, qs.length));
+    showQuestion();
+  })
+  .catch(err => {
+    app.innerHTML = `<h1>Could not load questions</h1><p class="error">${escapeHtml(err.message)}</p>`;
+  });
+</script>
+</body>
+</html>
